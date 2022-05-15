@@ -15,31 +15,60 @@ from utils import save_checkpoint, load_checkpoint
 
 
 def propagate_forward(device, model, criterion, imgs, captions, caplens):
+    """
+    Forward propagation
+    :param device: device
+    :param model: model
+    :param criterion: criterion
+    :param imgs: imgs
+    :param captions: captions
+    :param caplens: caplens
+    :return: loss of propagation
+    """
+
+    # put the data to device
     imgs = imgs.to(device)
     captions = captions.to(device)
 
+    # forward step
     predictions, captions_sorted, caption_lengths, alphas, sort_ind = model(imgs, captions[:-1], caplens)
 
+    # labels
     targets = captions_sorted[:, 1:]
 
+    # loss of predictions
     loss = criterion(predictions.reshape(-1, predictions.shape[2]), targets.reshape(-1))
 
     # doubly stochastic regularization
-    # encourages to sum the alphas at each pixel to 1 through the lstm timesteps
+    # encourages to sum the attention alphas at each pixel to 1 through the lstm timesteps
     loss += ((1. - alphas.sum(dim=1)) ** 2).mean()
 
     return loss
 
 
 def train_epoch(train_loader, device, model, criterion, optimizer):
+    """
+    Training epoch
+    :param train_loader: train data loader
+    :param device: device
+    :param model: model
+    :param criterion: criterion
+    :param optimizer: optimizer
+    :return: training loss
+    """
+
     losses = []
 
+    # calculate grads
     model.train()
 
+    # for batches in loader
     for idx, (imgs, captions, caplens) in tqdm(enumerate(train_loader), total=len(train_loader), leave=False):
+        # forward prop
         loss = propagate_forward(device, model, criterion, imgs, captions, caplens)
         losses.append(loss.item())
 
+        # backprop
         optimizer.zero_grad()
         loss.backward(loss)
         optimizer.step()
@@ -50,8 +79,18 @@ def train_epoch(train_loader, device, model, criterion, optimizer):
 
 
 def val_epoch(val_loader, device, model, criterion):
+    """
+    Validation epoch
+    :param val_loader: validation data loader
+    :param device: device
+    :param model: model
+    :param criterion: criterion
+    :return: validation loss
+    """
+
     losses = []
 
+    # don't calculate grads
     with torch.no_grad():
         model.eval()
 
@@ -65,6 +104,12 @@ def val_epoch(val_loader, device, model, criterion):
 
 
 def train():
+    """
+    Responsible for training the model
+    :return:
+    """
+
+    # pre-process transformations
     transform = transforms.Compose(
         [
             transforms.Resize((356, 356)),
@@ -76,17 +121,19 @@ def train():
 
     vocab = create_vocabulary(captions_train_file, captions_val_file)
 
+    # create datasets and dataloaders
+
     train_loader, train_dataset = get_loader(
-        root_folder=dataset_folder,
-        annotation_file=captions_train_file,
+        img_folder=dataset_folder,
+        captions_file=captions_train_file,
         transform=transform,
         vocab=vocab,
         num_workers=2,
     )
 
     val_loader, val_dataset = get_loader(
-        root_folder=dataset_folder,
-        annotation_file=captions_val_file,
+        img_folder=dataset_folder,
+        captions_file=captions_val_file,
         transform=transform,
         vocab=vocab,
         num_workers=2,
@@ -103,7 +150,8 @@ def train():
 
     epoch = 0
 
-    # initialize model, loss etc
+    # initialize model, criterion, optimizer, loss etc
+
     model = ImageCaptioner(embed_size, hidden_size, vocab_size, encoder_dim, attention_dim)
     model.to(device)
 
@@ -122,19 +170,26 @@ def train():
     best_loss = 100000000
     epochs_since_improvement = 0
 
+    # while the model learns
     while True:
         print("epoch: " + str(epoch))
 
-        val_loss = train_epoch(train_loader, device, model, criterion, optimizer)
-        # val_loss = val_epoch(val_loader, device, model, criterion)
+        # train, validate
+
+        _ = train_epoch(train_loader, device, model, criterion, optimizer)
+        val_loss = val_epoch(val_loader, device, model, criterion)
 
         print("val loss: " + str(val_loss))
+
+        # determining whether the model performs better after the training epoch
 
         is_best = val_loss < best_loss
         best_loss = max(val_loss, best_loss)
 
         if not is_best:
             epochs_since_improvement += 1
+
+        # the model performed better, save it
         else:
             epochs_since_improvement = 0
 
@@ -146,6 +201,7 @@ def train():
                 }
                 save_checkpoint(checkpoint)
 
+        # the model didn't improve for 5 epochs, stop training
         if epochs_since_improvement > 5:
             break
 

@@ -3,8 +3,8 @@ from torch.utils.data import DataLoader
 
 
 def get_loader(
-        root_folder,
-        annotation_file,
+        img_folder,
+        captions_file,
         transform,
         vocab,
         batch_size=32,
@@ -12,7 +12,19 @@ def get_loader(
         shuffle=True,
         pin_memory=True,
 ):
-    dataset = CaptionDataset(root_folder, annotation_file, transform=transform, vocab=vocab)
+    """
+
+    :param img_folder: image folder
+    :param captions_file: caption file
+    :param transform: pre-process transforms
+    :param vocab: vocabulary
+    :param batch_size: batch_size
+    :param num_workers: number of workers while loading
+    :param shuffle: whether to shuffle the dataset
+    :param pin_memory: pin_memory
+    :return:
+    """
+    dataset = CaptionDataset(img_folder, captions_file, transform=transform, vocab=vocab)
 
     pad_idx = dataset.vocab.stoi["<PAD>"]
 
